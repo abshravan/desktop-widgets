@@ -134,33 +134,38 @@ class MainWindow(QWidget):
         return r
 
     # ── Drag via QApplication-level event filter ──────────────────────────────
+    # Primary path: QWindow.startSystemMove() — the ONLY way to move a
+    # frameless window on Wayland (self.move() is silently ignored by the
+    # compositor for security reasons).
+    # Fallback path: manual self.move() — works on X11/xcb.
 
     def eventFilter(self, obj, event):
-        # Only handle events for widgets that belong to THIS window.
         if not isinstance(obj, QWidget) or obj.window() is not self:
             return False
 
         etype = event.type()
 
         if etype == QEvent.Type.MouseButtonPress:
-            if event.button() == Qt.MouseButton.LeftButton:
-                # Let buttons handle their own clicks
-                if isinstance(obj, QPushButton):
-                    return False
-                # Record offset between cursor and window top-left
-                self._drag_offset = event.globalPosition().toPoint() - self.pos()
-                print(f"[drag] press on {type(obj).__name__} — offset={self._drag_offset}")
+            if event.button() != Qt.MouseButton.LeftButton:
                 return False
+            if isinstance(obj, QPushButton):
+                return False  # close + headlines stay clickable
+
+            # Hand the drag to the window manager — works on X11 AND Wayland
+            handle = self.windowHandle()
+            if handle is not None and handle.startSystemMove():
+                return False  # WM owns the gesture from here
+
+            # Fallback (mostly older X11 / non-compliant WMs)
+            self._drag_offset = event.globalPosition().toPoint() - self.pos()
+            return False
 
         elif etype == QEvent.Type.MouseMove:
             if self._drag_offset is not None and (event.buttons() & Qt.MouseButton.LeftButton):
-                new_pos = event.globalPosition().toPoint() - self._drag_offset
-                self.move(new_pos)
-                return False
+                self.move(event.globalPosition().toPoint() - self._drag_offset)
+            return False
 
         elif etype == QEvent.Type.MouseButtonRelease:
-            if self._drag_offset is not None:
-                print("[drag] release")
             self._drag_offset = None
 
         return False

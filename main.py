@@ -1,7 +1,13 @@
 #!/usr/bin/env python3
 # main.py — Application entry point.
-# Sets up high-DPI scaling and launches the widget window.
+#
+# Wayland note: dragging a frameless window requires the compositor to
+# honour startSystemMove(). GNOME on Wayland supports this; some others
+# don't. If drag breaks on your setup, force the X11 backend:
+#
+#     QT_QPA_PLATFORM=xcb python3 main.py
 
+import os
 import sys
 from PyQt6.QtWidgets import QApplication
 from PyQt6.QtCore import Qt
@@ -10,14 +16,17 @@ from ui.main_window import MainWindow
 
 
 def main():
+    # Quick session-type log so the user can see what they're on
+    session = os.environ.get("XDG_SESSION_TYPE", "unknown")
+    print(f"[startup] session type: {session}")
+    print(f"[startup] Qt platform: {os.environ.get('QT_QPA_PLATFORM', '(auto)')}")
+
     app = QApplication(sys.argv)
 
-    # Smooth rendering on HiDPI displays
     app.setHighDpiScaleFactorRoundingPolicy(
         Qt.HighDpiScaleFactorRoundingPolicy.PassThrough
     )
 
-    # System-native sans-serif keeps things crisp without extra font deps
     font = QFont("Inter")
     font.setStyleHint(QFont.StyleHint.SansSerif)
     font.setPixelSize(13)
