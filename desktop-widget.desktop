@@ -1,0 +1,10 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Desktop Widget
+Comment=Floating desktop widget — clock, battery, weather, news
+Exec=python3 /home/user/desktop-widgets/main.py
+Icon=/home/user/desktop-widgets/assets/icon.png
+Terminal=false
+Categories=Utility;
+StartupNotify=false
