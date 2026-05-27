@@ -28,7 +28,7 @@ BATTERY_REFRESH_INTERVAL = 30000  # milliseconds (30 seconds)
 
 # --- Window Settings ---
 WINDOW_WIDTH = 320
-WINDOW_HEIGHT = 680
+WINDOW_HEIGHT = 720
 WINDOW_X = 50          # initial X position (pixels from left)
 WINDOW_Y = 50          # initial Y position (pixels from top)
 WINDOW_OPACITY = 0.92  # 0.0 (invisible) to 1.0 (solid)

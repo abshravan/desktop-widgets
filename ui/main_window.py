@@ -1,29 +1,25 @@
-# main_window.py — Drag works from anywhere on the widget.
-#
-# Strategy: install an event filter on QApplication itself. That sees EVERY
-# mouse event in the whole app before any widget can consume it. We filter
-# for events on our own widget tree and move the window accordingly.
-# QPushButton presses are ignored so close/headline buttons still work.
-#
-# Additional fixes from previous attempts:
-#   - Dropped Qt.WindowType.Tool: on GNOME/Wayland it can make the window
-#     unmoveable via standard means.
-#   - Removed nested layout indirection — DragBar still exists as a visual
-#     hint, but drag is global across the panel.
+# main_window.py — macOS-style floating panel.
+# Drag handled by QApplication-level event filter + windowHandle().startSystemMove().
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QFrame, QHBoxLayout, QLabel, QPushButton,
-    QApplication,
+    QApplication, QScrollArea,
 )
 from PyQt6.QtCore import Qt, QPoint, QEvent
 from PyQt6.QtGui import QPainter, QColor, QBrush
 
-from widgets.clock_widget   import ClockWidget
-from widgets.battery_widget import BatteryWidget
-from widgets.weather_widget import WeatherWidget
-from widgets.news_widget    import NewsWidget
-from styles.theme           import COLORS, SEPARATOR_STYLE
+from widgets.clock_widget          import ClockWidget
+from widgets.battery_widget        import BatteryWidget
+from widgets.weather_widget        import WeatherWidget
+from widgets.news_widget           import NewsWidget
+from widgets.system_monitor_widget import SystemMonitorWidget
+from widgets.pomodoro_widget       import PomodoroWidget
+from widgets.todo_widget           import TodoWidget
+from styles.theme                  import COLORS, SEPARATOR_STYLE, SCROLLBAR_STYLE
+from services                      import storage
 import config
+
+POSITION_KEY = "window.json"
 
 
 # ── Visual drag handle (purely decorative — drag works everywhere) ────────────
@@ -34,7 +30,6 @@ class DragBar(QWidget):
         self.setFixedHeight(38)
         self.setCursor(Qt.CursorShape.OpenHandCursor)
 
-        # Close dot in top-left
         close = QPushButton(self)
         close.setFixedSize(14, 14)
         close.move(14, 12)
@@ -70,23 +65,22 @@ class MainWindow(QWidget):
         self._drag_offset: QPoint | None = None
         self._setup_window()
         self._build_ui()
-
-        # The KEY change: install the filter on QApplication. This catches
-        # every mouse event before child widgets get a chance to swallow it.
         QApplication.instance().installEventFilter(self)
 
-    # ── Window setup ──────────────────────────────────────────────────────────
-
     def _setup_window(self):
-        # Note: Qt.WindowType.Tool is intentionally NOT used here — on
-        # GNOME/Wayland it can prevent the window from being moved.
         self.setWindowFlags(
             Qt.WindowType.FramelessWindowHint
             | Qt.WindowType.WindowStaysOnTopHint,
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setFixedWidth(config.WINDOW_WIDTH)
-        self.move(config.WINDOW_X, config.WINDOW_Y)
+
+        # Restore last position if we saved one, otherwise use config defaults
+        saved = storage.load(POSITION_KEY, None)
+        if saved and "x" in saved and "y" in saved:
+            self.move(saved["x"], saved["y"])
+        else:
+            self.move(config.WINDOW_X, config.WINDOW_Y)
         self.setWindowOpacity(config.WINDOW_OPACITY)
 
     # ── UI ────────────────────────────────────────────────────────────────────
@@ -108,24 +102,46 @@ class MainWindow(QWidget):
         outer.addWidget(panel)
 
         vbox = QVBoxLayout(panel)
-        vbox.setContentsMargins(0, 0, 0, 14)
+        vbox.setContentsMargins(0, 0, 0, 0)
         vbox.setSpacing(0)
 
         vbox.addWidget(DragBar(panel))
 
-        body = QVBoxLayout()
-        body.setContentsMargins(12, 0, 12, 0)
-        body.setSpacing(10)
+        # Body wrapped in a scroll area so users can fit more cards in a smaller window
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setStyleSheet(
+            f"QScrollArea {{ background: transparent; border: none; }}" + SCROLLBAR_STYLE
+        )
 
-        body.addWidget(ClockWidget())
-        body.addWidget(self._rule())
-        body.addWidget(BatteryWidget(config.BATTERY_REFRESH_INTERVAL))
-        body.addWidget(self._rule())
-        body.addWidget(WeatherWidget(config.WEATHER_REFRESH_INTERVAL))
-        body.addWidget(self._rule())
-        body.addWidget(NewsWidget(config.NEWS_REFRESH_INTERVAL))
+        body = QWidget()
+        body.setStyleSheet("background: transparent;")
+        body_layout = QVBoxLayout(body)
+        body_layout.setContentsMargins(12, 0, 12, 14)
+        body_layout.setSpacing(10)
 
-        vbox.addLayout(body)
+        body_layout.addWidget(ClockWidget())
+        body_layout.addWidget(self._rule())
+        body_layout.addWidget(SystemMonitorWidget())
+        body_layout.addWidget(self._rule())
+        body_layout.addWidget(BatteryWidget(config.BATTERY_REFRESH_INTERVAL))
+        body_layout.addWidget(self._rule())
+        body_layout.addWidget(PomodoroWidget())
+        body_layout.addWidget(self._rule())
+        body_layout.addWidget(TodoWidget())
+        body_layout.addWidget(self._rule())
+        body_layout.addWidget(WeatherWidget(config.WEATHER_REFRESH_INTERVAL))
+        body_layout.addWidget(self._rule())
+        body_layout.addWidget(NewsWidget(config.NEWS_REFRESH_INTERVAL))
+        body_layout.addStretch()
+
+        scroll.setWidget(body)
+        vbox.addWidget(scroll, 1)
+
+        # Give the window a sensible default height
+        self.setFixedHeight(config.WINDOW_HEIGHT)
 
     def _rule(self) -> QFrame:
         r = QFrame()
@@ -134,10 +150,6 @@ class MainWindow(QWidget):
         return r
 
     # ── Drag via QApplication-level event filter ──────────────────────────────
-    # Primary path: QWindow.startSystemMove() — the ONLY way to move a
-    # frameless window on Wayland (self.move() is silently ignored by the
-    # compositor for security reasons).
-    # Fallback path: manual self.move() — works on X11/xcb.
 
     def eventFilter(self, obj, event):
         if not isinstance(obj, QWidget) or obj.window() is not self:
@@ -148,15 +160,18 @@ class MainWindow(QWidget):
         if etype == QEvent.Type.MouseButtonPress:
             if event.button() != Qt.MouseButton.LeftButton:
                 return False
+            # Skip interactive widgets so they keep working normally
             if isinstance(obj, QPushButton):
-                return False  # close + headlines stay clickable
+                return False
+            # Skip text input and checkboxes (todo widget)
+            from PyQt6.QtWidgets import QLineEdit, QCheckBox
+            if isinstance(obj, (QLineEdit, QCheckBox)):
+                return False
 
-            # Hand the drag to the window manager — works on X11 AND Wayland
             handle = self.windowHandle()
             if handle is not None and handle.startSystemMove():
-                return False  # WM owns the gesture from here
+                return False
 
-            # Fallback (mostly older X11 / non-compliant WMs)
             self._drag_offset = event.globalPosition().toPoint() - self.pos()
             return False
 
@@ -169,6 +184,12 @@ class MainWindow(QWidget):
             self._drag_offset = None
 
         return False
+
+    # ── Save position on close ────────────────────────────────────────────────
+
+    def closeEvent(self, event):
+        storage.save(POSITION_KEY, {"x": self.x(), "y": self.y()})
+        super().closeEvent(event)
 
     # ── Drop shadow ───────────────────────────────────────────────────────────
 
