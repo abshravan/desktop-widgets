@@ -1,13 +1,21 @@
-# main_window.py — macOS-style floating widget, reliable native drag.
+# main_window.py — Drag works from anywhere on the widget.
 #
-# Drag strategy: QWindow.startSystemMove() hands the move operation to the
-# window manager (X11/Wayland) so child widgets can never steal it.
-# Pure-Python delta tracking is kept as a fallback for older compositors.
+# Strategy: install an event filter on QApplication itself. That sees EVERY
+# mouse event in the whole app before any widget can consume it. We filter
+# for events on our own widget tree and move the window accordingly.
+# QPushButton presses are ignored so close/headline buttons still work.
+#
+# Additional fixes from previous attempts:
+#   - Dropped Qt.WindowType.Tool: on GNOME/Wayland it can make the window
+#     unmoveable via standard means.
+#   - Removed nested layout indirection — DragBar still exists as a visual
+#     hint, but drag is global across the panel.
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QFrame, QHBoxLayout, QLabel, QPushButton,
+    QApplication,
 )
-from PyQt6.QtCore import Qt, QPoint
+from PyQt6.QtCore import Qt, QPoint, QEvent
 from PyQt6.QtGui import QPainter, QColor, QBrush
 
 from widgets.clock_widget   import ClockWidget
@@ -18,35 +26,19 @@ from styles.theme           import COLORS, SEPARATOR_STYLE
 import config
 
 
-# ── Drag bar ──────────────────────────────────────────────────────────────────
+# ── Visual drag handle (purely decorative — drag works everywhere) ────────────
 
 class DragBar(QWidget):
-    """
-    Dedicated 40 px drag zone at the top of the panel.
-    No sub-layouts that could swallow events — only the close dot is a child
-    (it sits in the top-left corner; the rest of the bar is empty surface).
-
-    On press we call QWindow.startSystemMove() which delegates the entire
-    drag gesture to the window manager.  This works on X11 and most Wayland
-    compositors.  A Python-delta fallback handles the rare case it returns
-    False (e.g. undecorated kwin on older configs).
-    """
-
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setFixedHeight(40)
-        self.setCursor(Qt.CursorShape.SizeAllCursor)
-        self._drag_pos: QPoint | None = None
-        self._dragging_native = False
-        self._build_close_button()
+        self.setFixedHeight(38)
+        self.setCursor(Qt.CursorShape.OpenHandCursor)
 
-    def _build_close_button(self):
-        # Absolutely positioned — NOT in a layout so it never covers the drag area
+        # Close dot in top-left
         close = QPushButton(self)
         close.setFixedSize(14, 14)
-        close.move(14, 13)           # left-aligned, vertically centred in 40px bar
+        close.move(14, 12)
         close.setCursor(Qt.CursorShape.PointingHandCursor)
-        close.setToolTip("Close")
         close.setStyleSheet(f"""
             QPushButton {{
                 background: {COLORS['accent_red']};
@@ -56,59 +48,18 @@ class DragBar(QWidget):
             QPushButton:hover {{ background: #ff6159; }}
         """)
         close.clicked.connect(lambda: self.window().close())
-        close.raise_()
-
-    # ── Pill indicator ────────────────────────────────────────────────────────
 
     def paintEvent(self, event):
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        active = self._drag_pos is not None or self._dragging_native
         p.setPen(Qt.PenStyle.NoPen)
-        p.setBrush(QBrush(QColor("#6e6e73" if active else "#48484a")))
-        pw, ph = 40, 4
+        p.setBrush(QBrush(QColor("#6e6e73")))
+        pw, ph = 44, 5
         p.drawRoundedRect(
             (self.width() - pw) // 2,
             (self.height() - ph) // 2,
             pw, ph, 2, 2,
         )
-
-    # ── Mouse events ──────────────────────────────────────────────────────────
-
-    def mousePressEvent(self, event):
-        if event.button() != Qt.MouseButton.LeftButton:
-            return
-        event.accept()
-
-        win = self.window()
-        handle = win.windowHandle()
-
-        if handle:
-            # Native WM drag: survives any Qt event re-routing on X11/Wayland
-            self._dragging_native = handle.startSystemMove()
-            if self._dragging_native:
-                self.update()
-                return
-
-        # Fallback: manual tracking
-        self._drag_pos = event.globalPosition().toPoint()
-        self.setCursor(Qt.CursorShape.ClosedHandCursor)
-        self.update()
-
-    def mouseMoveEvent(self, event):
-        if self._drag_pos and event.buttons() & Qt.MouseButton.LeftButton:
-            cur = event.globalPosition().toPoint()
-            self.window().move(self.window().pos() + cur - self._drag_pos)
-            self._drag_pos = cur
-
-    def mouseReleaseEvent(self, event):
-        self._drag_pos = None
-        self._dragging_native = False
-        self.setCursor(Qt.CursorShape.SizeAllCursor)
-        self.update()
-
-    def enterEvent(self, event):
-        self.setCursor(Qt.CursorShape.SizeAllCursor)
 
 
 # ── Main window ───────────────────────────────────────────────────────────────
@@ -116,26 +67,35 @@ class DragBar(QWidget):
 class MainWindow(QWidget):
     def __init__(self):
         super().__init__()
+        self._drag_offset: QPoint | None = None
         self._setup_window()
         self._build_ui()
 
+        # The KEY change: install the filter on QApplication. This catches
+        # every mouse event before child widgets get a chance to swallow it.
+        QApplication.instance().installEventFilter(self)
+
+    # ── Window setup ──────────────────────────────────────────────────────────
+
     def _setup_window(self):
+        # Note: Qt.WindowType.Tool is intentionally NOT used here — on
+        # GNOME/Wayland it can prevent the window from being moved.
         self.setWindowFlags(
             Qt.WindowType.FramelessWindowHint
-            | Qt.WindowType.WindowStaysOnTopHint
-            | Qt.WindowType.Tool,
+            | Qt.WindowType.WindowStaysOnTopHint,
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setFixedWidth(config.WINDOW_WIDTH)
         self.move(config.WINDOW_X, config.WINDOW_Y)
         self.setWindowOpacity(config.WINDOW_OPACITY)
 
+    # ── UI ────────────────────────────────────────────────────────────────────
+
     def _build_ui(self):
         outer = QVBoxLayout(self)
         outer.setContentsMargins(10, 10, 10, 10)
         outer.setSpacing(0)
 
-        # ── Panel ─────────────────────────────────────────────────────────────
         panel = QWidget(self)
         panel.setObjectName("Panel")
         panel.setStyleSheet(f"""
@@ -151,10 +111,8 @@ class MainWindow(QWidget):
         vbox.setContentsMargins(0, 0, 0, 14)
         vbox.setSpacing(0)
 
-        # Drag bar lives at the very top of the panel
         vbox.addWidget(DragBar(panel))
 
-        # Content
         body = QVBoxLayout()
         body.setContentsMargins(12, 0, 12, 0)
         body.setSpacing(10)
@@ -175,8 +133,41 @@ class MainWindow(QWidget):
         r.setStyleSheet(SEPARATOR_STYLE)
         return r
 
+    # ── Drag via QApplication-level event filter ──────────────────────────────
+
+    def eventFilter(self, obj, event):
+        # Only handle events for widgets that belong to THIS window.
+        if not isinstance(obj, QWidget) or obj.window() is not self:
+            return False
+
+        etype = event.type()
+
+        if etype == QEvent.Type.MouseButtonPress:
+            if event.button() == Qt.MouseButton.LeftButton:
+                # Let buttons handle their own clicks
+                if isinstance(obj, QPushButton):
+                    return False
+                # Record offset between cursor and window top-left
+                self._drag_offset = event.globalPosition().toPoint() - self.pos()
+                print(f"[drag] press on {type(obj).__name__} — offset={self._drag_offset}")
+                return False
+
+        elif etype == QEvent.Type.MouseMove:
+            if self._drag_offset is not None and (event.buttons() & Qt.MouseButton.LeftButton):
+                new_pos = event.globalPosition().toPoint() - self._drag_offset
+                self.move(new_pos)
+                return False
+
+        elif etype == QEvent.Type.MouseButtonRelease:
+            if self._drag_offset is not None:
+                print("[drag] release")
+            self._drag_offset = None
+
+        return False
+
+    # ── Drop shadow ───────────────────────────────────────────────────────────
+
     def paintEvent(self, event):
-        # Multi-layer soft drop-shadow painted on the transparent outer margin
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         for i in range(8, 0, -1):
