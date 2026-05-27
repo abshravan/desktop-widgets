@@ -1,3 +1,4 @@
-from .main_window import MainWindow
+from .launcher      import Launcher
+from .widget_window import WidgetWindow
 
-__all__ = ["MainWindow"]
+__all__ = ["Launcher", "WidgetWindow"]
