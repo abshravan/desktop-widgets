@@ -14,15 +14,15 @@ from styles.theme import (
 class ClockFace(QWidget):
     """Pure-paint analogue face. No layout children — just QPainter output."""
 
-    # Visual tokens — tweak here to retheme the face only.
-    BG_COLOR          = QColor("#0a0d14")
-    OUTER_RING_COLOR  = QColor("#1f2430")
-    DOT_COLOR_MINOR   = QColor("#3d4555")
-    DOT_COLOR_MAJOR   = QColor("#e6edf3")
-    HAND_HOUR_COLOR   = QColor("#e6edf3")
-    HAND_MINUTE_COLOR = QColor("#e6edf3")
-    HAND_SECOND_COLOR = QColor("#ff4d4d")   # Nothing-style red accent
-    CENTER_COLOR      = QColor("#ff4d4d")
+    # Tokens aligned to macOS dark palette
+    BG_COLOR          = QColor("#1c1c1e")   # matches panel bg
+    OUTER_RING_COLOR  = QColor("#3a3a3c")   # macOS tertiary bg
+    DOT_COLOR_MINOR   = QColor("#48484a")
+    DOT_COLOR_MAJOR   = QColor("#ebebf5")
+    HAND_HOUR_COLOR   = QColor("#ffffff")
+    HAND_MINUTE_COLOR = QColor("#ffffff")
+    HAND_SECOND_COLOR = QColor("#ff453a")   # macOS system red
+    CENTER_COLOR      = QColor("#ff453a")
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -153,9 +153,9 @@ class ClockWidget(QFrame):
         self._digital_label.setStyleSheet(f"""
             QLabel {{
                 color: {COLORS['text_primary']};
-                font-size: 16px;
-                font-weight: 600;
-                letter-spacing: 2px;
+                font-size: 15px;
+                font-weight: 300;
+                letter-spacing: 3px;
             }}
         """)
         self._digital_label.setAlignment(Qt.AlignmentFlag.AlignHCenter)
