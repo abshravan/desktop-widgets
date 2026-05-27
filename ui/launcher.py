@@ -9,14 +9,14 @@
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QCheckBox,
-    QApplication, QFrame,
+    QApplication, QFrame, QScrollArea,
 )
 from PyQt6.QtCore import Qt, QPoint, QEvent
 from PyQt6.QtGui import QPainter, QColor, QBrush
 
 from ui.widget_window   import WidgetWindow
 from ui.widget_registry import WIDGET_REGISTRY
-from styles.theme       import COLORS, SEPARATOR_STYLE
+from styles.theme       import COLORS, SEPARATOR_STYLE, SCROLLBAR_STYLE
 from services           import storage
 
 STATE_FILE = "state.json"
@@ -123,12 +123,30 @@ class Launcher(QWidget):
         rule.setStyleSheet(SEPARATOR_STYLE)
         v.addWidget(rule)
 
-        # One toggle row per registered widget
+        # Scrollable list so the launcher stays compact regardless of widget count
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setStyleSheet(
+            f"QScrollArea {{ background: transparent; border: none; }}"
+            + SCROLLBAR_STYLE
+        )
+        scroll.setMaximumHeight(440)
+
+        list_container = QWidget()
+        list_container.setStyleSheet("background: transparent;")
+        list_layout = QVBoxLayout(list_container)
+        list_layout.setContentsMargins(0, 0, 0, 0)
+        list_layout.setSpacing(4)
+
         self._checkboxes: dict[str, QCheckBox] = {}
         for name, meta in WIDGET_REGISTRY.items():
-            v.addLayout(self._make_row(name, meta))
+            list_layout.addLayout(self._make_row(name, meta))
+        list_layout.addStretch()
 
-        v.addStretch()
+        scroll.setWidget(list_container)
+        v.addWidget(scroll)
 
     def _make_row(self, name: str, meta: dict) -> QHBoxLayout:
         row = QHBoxLayout()

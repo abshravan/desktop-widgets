@@ -10,10 +10,16 @@ from .calculator_widget     import CalculatorWidget
 from .calendar_widget       import CalendarWidget
 from .network_widget        import NetworkWidget
 from .timer_widget          import TimerWidget
+from .world_clock_widget    import WorldClockWidget
+from .crypto_widget         import CryptoWidget
+from .clipboard_widget      import ClipboardWidget
+from .disk_widget           import DiskWidget
+from .now_playing_widget    import NowPlayingWidget
 
 __all__ = [
     "ClockWidget", "BatteryWidget", "WeatherWidget", "NewsWidget",
     "SystemMonitorWidget", "PomodoroWidget", "TodoWidget",
     "NotesWidget", "CalculatorWidget", "CalendarWidget",
-    "NetworkWidget", "TimerWidget",
+    "NetworkWidget", "TimerWidget", "WorldClockWidget",
+    "CryptoWidget", "ClipboardWidget", "DiskWidget", "NowPlayingWidget",
 ]
