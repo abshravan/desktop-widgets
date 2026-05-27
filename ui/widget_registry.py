@@ -18,7 +18,7 @@ WIDGET_REGISTRY = {
         "label":    "Clock",
         "icon":     "🕐",
         "factory":  lambda: ClockWidget(),
-        "width":    230,
+        "width":    240,
         "default":  (60, 60),
     },
     "system": {
